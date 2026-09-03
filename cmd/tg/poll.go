@@ -28,6 +28,7 @@ func (a *app) newPollCreateCmd() *cobra.Command {
 		multiple bool
 		public   bool
 		closeIn  time.Duration
+		topic    topicOptions
 	)
 
 	cmd := &cobra.Command{
@@ -36,11 +37,12 @@ func (a *app) newPollCreateCmd() *cobra.Command {
 		Long: `Create a poll with a question and at least two options. By default the
 poll is single-choice and anonymous.`,
 		Example: `  tg poll create @group "Lunch?" "Pizza" "Sushi" "Salad"
-  tg poll create me "Pick" "A" "B" --multiple --public --close-in 1h`,
+  tg poll create me "Pick" "A" "B" --multiple --public --close-in 1h
+  tg poll create @myforum --topic 42 "Ship it?" "Yes" "No"`,
 		Args:              cobra.MinimumNArgs(4),
 		ValidArgsFunction: peerArgCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			peer, question, options := args[0], args[1], args[2:]
+			peerArg, question, options := args[0], args[1], args[2:]
 
 			answers := make([]message.PollAnswerOption, 0, len(options))
 			for _, o := range options {
@@ -48,8 +50,12 @@ poll is single-choice and anonymous.`,
 			}
 
 			return a.run(cmd.Context(), runParams{auth: authUser}, func(ctx context.Context, api *tg.Client) error {
-				sender, m, err := a.sender(api)
+				peer, topicID := topic.resolve(peerArg)
+				sender, m, err := a.senderIn(api, topicID)
 				if err != nil {
+					return err
+				}
+				if err := requireForum(ctx, m, peer, topicID); err != nil {
 					return err
 				}
 				bf, err := builderFor(ctx, m, sender, peer)
@@ -81,6 +87,7 @@ poll is single-choice and anonymous.`,
 	fs.BoolVar(&multiple, "multiple", false, "allow multiple answers")
 	fs.BoolVar(&public, "public", false, "make votes public (non-anonymous)")
 	fs.DurationVar(&closeIn, "close-in", 0, "automatically close the poll after this duration")
+	topic.register(fs)
 
 	return cmd
 }

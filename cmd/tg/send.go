@@ -26,8 +26,9 @@ func (r sentResult) MarshalText(w io.Writer) error {
 
 func (a *app) newSendCmd() *cobra.Command {
 	var (
-		peer string
-		msg  messageOptions
+		peer  string
+		msg   messageOptions
+		topic topicOptions
 	)
 
 	cmd := &cobra.Command{
@@ -50,7 +51,10 @@ it has been cached first by running ` + "`tg chats list`" + `.`,
   tg chats list >/dev/null && tg send --peer id:2201861038 "hi"
 
   # HTML formatting, sent silently
-  tg send --peer @durov --html --silent "<b>bold</b>"`,
+  tg send --peer @durov --html --silent "<b>bold</b>"
+
+  # Into a forum topic
+  tg send --peer @myforum --topic 42 "status update"`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var text string
@@ -59,11 +63,15 @@ it has been cached first by running ` + "`tg chats list`" + `.`,
 			}
 
 			return a.run(cmd.Context(), runParams{auth: authUser}, func(ctx context.Context, api *tg.Client) error {
-				sender, m, err := a.sender(api)
+				peerArg, topicID := topic.resolve(peer)
+				sender, m, err := a.senderIn(api, topicID)
 				if err != nil {
 					return err
 				}
-				bf, err := builderFor(ctx, m, sender, peer)
+				if err := requireForum(ctx, m, peerArg, topicID); err != nil {
+					return err
+				}
+				bf, err := builderFor(ctx, m, sender, peerArg)
 				if err != nil {
 					return err
 				}
@@ -73,7 +81,7 @@ it has been cached first by running ` + "`tg chats list`" + `.`,
 				if err != nil {
 					return errors.Wrap(err, "send")
 				}
-				return a.printer.Emit(sentResult{Peer: peer, MessageID: id})
+				return a.printer.Emit(sentResult{Peer: peerArg, MessageID: id})
 			})
 		},
 	}
@@ -82,6 +90,7 @@ it has been cached first by running ` + "`tg chats list`" + `.`,
 	fs.StringVarP(&peer, "peer", "p", "",
 		"peer to write (username, phone, deep link, or id:<n>); default: yourself")
 	msg.register(fs)
+	topic.register(fs)
 	registerPeerCompletion(cmd, "peer")
 
 	return cmd

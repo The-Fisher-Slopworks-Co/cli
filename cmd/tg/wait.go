@@ -13,14 +13,18 @@ import (
 )
 
 func (a *app) newWaitCmd() *cobra.Command {
-	var timeout time.Duration
+	var (
+		timeout time.Duration
+		topic   topicOptions
+	)
 
 	cmd := &cobra.Command{
-		Use:               "wait [peer]",
-		Short:             "Block until a new message arrives",
-		GroupID:           groupMessaging,
-		Long:              "Block until the next incoming message (optionally from one peer), then print it and exit.",
-		Example:           "  tg wait @durov --timeout 5m\n  tg wait --output json",
+		Use:     "wait [peer]",
+		Short:   "Block until a new message arrives",
+		GroupID: groupMessaging,
+		Long: `Block until the next incoming message (optionally from one peer, or one
+forum topic of it), then print it and exit.`,
+		Example:           "  tg wait @durov --timeout 5m\n  tg wait --output json\n  tg wait @myforum --topic 42",
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: peerArgCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -29,14 +33,15 @@ func (a *app) newWaitCmd() *cobra.Command {
 					if err := requireAuth(ctx, client); err != nil {
 						return err
 					}
-					filterID, err := a.resolveFilterFor(ctx, client.API(), a.active, args)
+					filterID, filterTopic, err := a.resolveFilterFor(ctx, client.API(), a.active, args, topic)
 					if err != nil {
 						return err
 					}
 
 					events := make(chan watchEvent, 1)
 					stream := &messageStream{
-						filterID: filterID,
+						filterID:    filterID,
+						filterTopic: filterTopic,
 						onEvent: func(ev watchEvent) {
 							select {
 							case events <- ev:
@@ -65,7 +70,9 @@ func (a *app) newWaitCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().DurationVar(&timeout, "timeout", 0, "give up after this duration (0 = wait forever)")
+	fs := cmd.Flags()
+	fs.DurationVar(&timeout, "timeout", 0, "give up after this duration (0 = wait forever)")
+	topic.register(fs)
 
 	return cmd
 }

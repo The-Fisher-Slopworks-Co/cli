@@ -170,7 +170,7 @@ func buildMessageItem(msg *tg.Message, ent peer.Entities) messageItem {
 	}
 	if rt, ok := msg.GetReplyTo(); ok {
 		if h, ok := rt.(*tg.MessageReplyHeader); ok {
-			item.ReplyTo = h.ReplyToMsgID
+			item.TopicID, item.ReplyTo = topicFromReply(h)
 		}
 	}
 	return item

@@ -65,6 +65,7 @@ func (a *app) newAlbumCmd() *cobra.Command {
 	var (
 		peer    string
 		caption string
+		topic   topicOptions
 	)
 
 	cmd := &cobra.Command{
@@ -75,17 +76,22 @@ func (a *app) newAlbumCmd() *cobra.Command {
 videos and documents are supported (stickers are not). The caption, if any, is
 attached to the first item.`,
 		Example: `  tg album a.jpg b.jpg c.jpg
-  tg album --peer @durov clip.mp4 photo.jpg --caption "trip"`,
+  tg album --peer @durov clip.mp4 photo.jpg --caption "trip"
+  tg album --peer @myforum --topic 42 a.jpg b.jpg`,
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.run(cmd.Context(), runParams{auth: authUser}, func(ctx context.Context, api *tg.Client) error {
 				upld := uploader.NewUploader(api).WithPartSize(uploader.MaximumPartSize)
-				sender, m, err := a.sender(api)
+				peerArg, topicID := topic.resolve(peer)
+				sender, m, err := a.senderIn(api, topicID)
 				if err != nil {
 					return err
 				}
 				sender = sender.WithUploader(upld)
-				bf, err := builderFor(ctx, m, sender, peer)
+				if err := requireForum(ctx, m, peerArg, topicID); err != nil {
+					return err
+				}
+				bf, err := builderFor(ctx, m, sender, peerArg)
 				if err != nil {
 					return err
 				}
@@ -107,7 +113,7 @@ attached to the first item.`,
 				if err != nil {
 					return errors.Wrap(err, "send album")
 				}
-				return a.printer.Emit(sentResult{Peer: peer, MessageID: id})
+				return a.printer.Emit(sentResult{Peer: peerArg, MessageID: id})
 			})
 		},
 	}
@@ -115,6 +121,7 @@ attached to the first item.`,
 	fs := cmd.Flags()
 	fs.StringVarP(&peer, "peer", "p", "", "peer to send to; default: yourself")
 	fs.StringVar(&caption, "caption", "", "caption attached to the first item")
+	topic.register(fs)
 	registerPeerCompletion(cmd, "peer")
 
 	return cmd

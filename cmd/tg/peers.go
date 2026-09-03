@@ -126,11 +126,7 @@ func (a *app) managerFor(api *tg.Client, st *accountState) (*peerManager, error)
 // resolver cannot (the message package rejects the ":" as an invalid domain
 // before delegating to the resolver).
 func (a *app) sender(api *tg.Client) (*message.Sender, *peerManager, error) {
-	m, err := a.manager(api)
-	if err != nil {
-		return nil, nil, err
-	}
-	return message.NewSender(api).WithResolver(peerResolver{pm: m}), m, nil
+	return a.senderIn(api, 0)
 }
 
 // builderFor returns a request builder targeting peer; the empty string, "me"

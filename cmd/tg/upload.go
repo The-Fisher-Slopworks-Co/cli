@@ -35,6 +35,7 @@ type uploadFlags struct {
 	docType  *enumValue
 	threads  int
 	msg      messageOptions
+	topic    topicOptions
 }
 
 // uploadedFile is one uploaded file in an uploadResult.
@@ -243,22 +244,31 @@ The document type is detected from the file's MIME type unless --type is set.`,
   tg upload --peer @me --type video clip.mp4
 
   # Upload with a caption
-  tg upload --peer @durov --message "here you go" photo.jpg`,
+  tg upload --peer @durov --message "here you go" photo.jpg
+
+  # Into a forum topic
+  tg upload --peer @myforum --topic 42 build.log`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			arg := args[0]
 
 			return a.run(cmd.Context(), runParams{auth: authUser}, func(ctx context.Context, api *tg.Client) error {
+				// The uploader keeps the plain client: file parts carry no
+				// topic, only the message that references them does.
 				upld := uploader.NewUploader(api).
 					WithThreads(uf.threads).
 					WithPartSize(uploader.MaximumPartSize)
-				sender, m, err := a.sender(api)
+				peerArg, topicID := uf.topic.resolve(uf.peer)
+				sender, m, err := a.senderIn(api, topicID)
 				if err != nil {
 					return err
 				}
 				sender = sender.WithUploader(upld)
 
-				builder, err := builderFor(ctx, m, sender, uf.peer)
+				if err := requireForum(ctx, m, peerArg, topicID); err != nil {
+					return err
+				}
+				builder, err := builderFor(ctx, m, sender, peerArg)
 				if err != nil {
 					return err
 				}
@@ -293,6 +303,7 @@ The document type is detected from the file's MIME type unless --type is set.`,
 	flags.Var(uf.docType, "type", "type of uploaded document (default: detect from MIME)")
 	flags.IntVarP(&uf.threads, "threads", "j", 1, "concurrency limit")
 	uf.msg.register(flags)
+	uf.topic.register(flags)
 
 	registerPeerCompletion(cmd, "peer")
 	registerEnumCompletion(cmd, "type", documentTypes())

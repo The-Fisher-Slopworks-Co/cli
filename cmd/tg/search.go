@@ -26,24 +26,29 @@ func messagesToHistory(msgs []tg.MessageClass, ent peer.Entities) historyResult 
 	return out
 }
 
-// searchMessages searches a single peer's messages (one page).
+// searchMessages searches a single peer's messages (one page). A non-zero topic
+// restricts the search to that forum topic.
 func searchMessages(
 	ctx context.Context,
 	api *tg.Client,
 	p tg.InputPeerClass,
 	q string,
 	filter tg.MessagesFilterClass,
-	limit int,
+	limit, topic int,
 ) (historyResult, error) {
 	if filter == nil {
 		filter = &tg.InputMessagesFilterEmpty{}
 	}
-	res, err := api.MessagesSearch(ctx, &tg.MessagesSearchRequest{
+	req := &tg.MessagesSearchRequest{
 		Peer:   p,
 		Q:      q,
 		Filter: filter,
 		Limit:  limit,
-	})
+	}
+	if topic != 0 {
+		req.SetTopMsgID(topic)
+	}
+	res, err := api.MessagesSearch(ctx, req)
 	if err != nil {
 		return historyResult{}, errors.Wrap(err, "messages.search")
 	}
@@ -76,6 +81,7 @@ func (a *app) newSearchCmd() *cobra.Command {
 	var (
 		global bool
 		limit  int
+		topic  topicOptions
 	)
 
 	cmd := &cobra.Command{
@@ -85,7 +91,8 @@ func (a *app) newSearchCmd() *cobra.Command {
 		Long: `Search messages. With a peer, searches that chat's history; with --global
 the peer is omitted and the query is run across all chats.`,
 		Example: `  tg search @durov "release"
-  tg search --global "invoice" --limit 20`,
+  tg search --global "invoice" --limit 20
+  tg search @myforum --topic 42 "deploy"`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.run(cmd.Context(), runParams{auth: authUser}, func(ctx context.Context, api *tg.Client) error {
@@ -103,11 +110,12 @@ the peer is omitted and the query is run across all chats.`,
 				if err != nil {
 					return err
 				}
-				peer, err := resolvePeer(ctx, m, args[0])
+				peerArg, topicID := topic.resolve(args[0])
+				peer, err := resolvePeer(ctx, m, peerArg)
 				if err != nil {
 					return err
 				}
-				res, err := searchMessages(ctx, api, peer, args[1], nil, limit)
+				res, err := searchMessages(ctx, api, peer, args[1], nil, limit, topicID)
 				if err != nil {
 					return err
 				}
@@ -119,6 +127,7 @@ the peer is omitted and the query is run across all chats.`,
 	fs := cmd.Flags()
 	fs.BoolVarP(&global, "global", "g", false, "search across all chats (query only, no peer)")
 	fs.IntVarP(&limit, "limit", "n", 50, "maximum number of results")
+	topic.register(fs)
 
 	return cmd
 }

@@ -107,8 +107,18 @@ your own copy.`,
 	return cmd
 }
 
-// deleteHistory clears a peer's history.
-func deleteHistory(ctx context.Context, api *tg.Client, peer tg.InputPeerClass, revoke, justClear bool) error {
+// deleteHistory clears a peer's history. A non-zero topic deletes just that
+// forum topic (its whole message thread, and the topic itself).
+func deleteHistory(ctx context.Context, api *tg.Client, peer tg.InputPeerClass, topic int, revoke, justClear bool) error {
+	if topic != 0 {
+		if _, err := api.MessagesDeleteTopicHistory(ctx, &tg.MessagesDeleteTopicHistoryRequest{
+			Peer:     peer,
+			TopMsgID: topic,
+		}); err != nil {
+			return errors.Wrap(err, "messages.deleteTopicHistory")
+		}
+		return nil
+	}
 	if ch, ok := peer.(*tg.InputPeerChannel); ok {
 		if _, err := api.ChannelsDeleteHistory(ctx, &tg.ChannelsDeleteHistoryRequest{
 			Channel: &tg.InputChannel{ChannelID: ch.ChannelID, AccessHash: ch.AccessHash},
@@ -133,6 +143,7 @@ func (a *app) newDeleteHistoryCmd() *cobra.Command {
 	var (
 		yes    bool
 		revoke bool
+		topic  topicOptions
 	)
 
 	cmd := &cobra.Command{
@@ -140,9 +151,11 @@ func (a *app) newDeleteHistoryCmd() *cobra.Command {
 		Short:   "Delete a chat's history",
 		GroupID: groupMessaging,
 		Long: `Delete the message history of a peer. Destructive: requires --yes.
-By default only clears your own copy; pass --revoke to delete for everyone.`,
+By default only clears your own copy; pass --revoke to delete for everyone.
+With --topic, deletes one forum topic instead of the whole chat.`,
 		Example: `  tg delete-history @durov --yes
-  tg delete-history me --yes --revoke`,
+  tg delete-history me --yes --revoke
+  tg delete-history @myforum --topic 42 --yes`,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: peerArgCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -154,11 +167,12 @@ By default only clears your own copy; pass --revoke to delete for everyone.`,
 				if err != nil {
 					return err
 				}
-				peer, err := resolvePeer(ctx, m, args[0])
+				peerArg, topicID := topic.resolve(args[0])
+				peer, err := resolvePeer(ctx, m, peerArg)
 				if err != nil {
 					return err
 				}
-				if err := deleteHistory(ctx, api, peer, revoke, !revoke); err != nil {
+				if err := deleteHistory(ctx, api, peer, topicID, revoke, !revoke); err != nil {
 					return err
 				}
 				return a.printer.Emit(deletedResult{Count: 1})
@@ -169,6 +183,7 @@ By default only clears your own copy; pass --revoke to delete for everyone.`,
 	fs := cmd.Flags()
 	fs.BoolVar(&yes, "yes", false, "confirm deletion")
 	fs.BoolVar(&revoke, "revoke", false, "delete for everyone (not just your copy)")
+	topic.register(fs)
 
 	return cmd
 }

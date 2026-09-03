@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/gotd/td/telegram/query"
+	"github.com/gotd/td/telegram/query/messages"
 	"github.com/gotd/td/tg"
 )
 
@@ -21,6 +22,8 @@ type messageItem struct {
 	Text    string   `json:"text,omitempty"`
 	Media   string   `json:"media,omitempty"`
 	ReplyTo int      `json:"reply_to,omitempty"`
+	// TopicID is the forum topic the message belongs to, if any.
+	TopicID int `json:"topic_id,omitempty"`
 }
 
 // historyResult is the result of `tg history`.
@@ -46,6 +49,9 @@ func (h historyResult) MarshalText(w io.Writer) error {
 		if m.Media != "" {
 			line += " [" + m.Media + "]"
 		}
+		if m.TopicID != 0 {
+			line += fmt.Sprintf(" (topic #%d)", m.TopicID)
+		}
 		if m.ReplyTo != 0 {
 			line += fmt.Sprintf(" (reply to #%d)", m.ReplyTo)
 		}
@@ -57,8 +63,14 @@ func (h historyResult) MarshalText(w io.Writer) error {
 }
 
 // listHistory reads up to limit recent messages from peer (newest-first from the
-// API), returning them oldest-first.
-func listHistory(ctx context.Context, api *tg.Client, peer tg.InputPeerClass, limit int) (historyResult, error) {
+// API), returning them oldest-first. A non-zero topic reads that forum topic
+// only, which Telegram serves as the reply thread of the topic's root message.
+func listHistory(
+	ctx context.Context,
+	api *tg.Client,
+	peer tg.InputPeerClass,
+	limit, topic int,
+) (historyResult, error) {
 	// Fetch in large batches to minimize round trips. The iterator's default
 	// batch size is 1, so it issues one messages.getHistory RPC per message,
 	// which makes larger --limit values extremely slow. Telegram does not
@@ -66,7 +78,13 @@ func listHistory(ctx context.Context, api *tg.Client, peer tg.InputPeerClass, li
 	// results, so cap at 100. Clamp to at least 1: a non-positive batch size
 	// would panic the iterator (it preallocates a slice with that capacity).
 	batch := max(1, min(limit, 100))
-	iter := query.Messages(api).GetHistory(peer).BatchSize(batch).Iter()
+	q := query.Messages(api)
+	var iter *messages.Iterator
+	if topic != 0 {
+		iter = q.GetReplies(peer).MsgID(topic).BatchSize(batch).Iter()
+	} else {
+		iter = q.GetHistory(peer).BatchSize(batch).Iter()
+	}
 
 	var res historyResult
 	for iter.Next(ctx) {
@@ -95,7 +113,10 @@ func listHistory(ctx context.Context, api *tg.Client, peer tg.InputPeerClass, li
 }
 
 func (a *app) newHistoryCmd() *cobra.Command {
-	var limit int
+	var (
+		limit int
+		topic topicOptions
+	)
 
 	cmd := &cobra.Command{
 		Use:     "history <peer>",
@@ -106,7 +127,11 @@ func (a *app) newHistoryCmd() *cobra.Command {
 oldest-first). The peer is me/self, @username, phone, or a t.me link.`,
 		Example: `  tg history me
   tg history @durov --limit 20
-  tg history @somechannel --output json`,
+  tg history @somechannel --output json
+
+  # One forum topic (by id, or straight from a t.me link)
+  tg history @myforum --topic 42
+  tg history https://t.me/myforum/42/1337`,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: peerArgCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -115,11 +140,12 @@ oldest-first). The peer is me/self, @username, phone, or a t.me link.`,
 				if err != nil {
 					return err
 				}
-				peer, err := resolvePeer(ctx, m, args[0])
+				peerArg, topicID := topic.resolve(args[0])
+				peer, err := resolvePeer(ctx, m, peerArg)
 				if err != nil {
 					return err
 				}
-				res, err := listHistory(ctx, api, peer, limit)
+				res, err := listHistory(ctx, api, peer, limit, topicID)
 				if err != nil {
 					return err
 				}
@@ -129,6 +155,7 @@ oldest-first). The peer is me/self, @username, phone, or a t.me link.`,
 	}
 
 	cmd.Flags().IntVarP(&limit, "limit", "n", 30, "maximum number of messages to read")
+	topic.register(cmd.Flags())
 
 	return cmd
 }
