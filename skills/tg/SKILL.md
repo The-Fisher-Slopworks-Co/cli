@@ -41,6 +41,10 @@ login needs the user. `tg init` is safe to run yourself.
 - **Peers** (`--peer`/`<peer>`) accept: `me` or `self` (Saved Messages),
   `@username`, a phone number, or a `t.me/…` link. Resolved access-hashes are
   cached locally, so reuse the same form.
+- **Forum topics** are a second coordinate on top of the peer: pass
+  `--topic <id>` to any messaging command, or hand it a topic link
+  (`t.me/<forum>/<topic>/<message>`) as the peer. Ids come from
+  `tg topics list <peer> -o json`. The always-present "General" topic is id 1.
 - **Destructive commands require `--yes`**: `delete`, `delete-history`,
   `unpin-all`, and similar. Never add `--yes` without the user asking for the
   destructive action — confirm intent first.
@@ -85,11 +89,43 @@ tg mute @x
 tg archive @x
 ```
 
+Forum topics (supergroups with topics enabled — `tg chats list` flags them
+`forum`). Everything is addressed by the numeric topic id:
+
+```bash
+# Discover topics and their ids
+tg topics list @myforum -o json | jq -r '.data.topics[] | "\(.id)\t\(.title)"'
+
+# Read and post inside one topic
+tg history @myforum --topic 42 -o json
+tg send --peer @myforum --topic 42 "status update"
+tg reply @myforum 1337 "on it" --topic 42
+tg upload --peer @myforum --topic 42 ./build.log
+tg search @myforum --topic 42 "deploy" -o json
+tg watch @myforum --topic 42 -o json
+
+# A topic link works as the peer, no --topic needed
+tg history https://t.me/myforum/42/1337
+
+# Create one and post into it
+ID=$(tg topics create @myforum "Deploys" -o json | jq -r .data.topic_id)
+tg send --peer @myforum --topic "$ID" "first"
+
+# Manage
+tg topics close @myforum 42          # also: reopen, pin, unpin, edit --title, get
+```
+
+`history`, `search` and `watch` on a forum **without** `--topic` return every
+topic mixed together; each message carries `topic_id` in JSON so you can tell
+them apart.
+
 Destructive (only when the user explicitly asks):
 
 ```bash
 tg delete @x 12345 --yes            # <peer> <message-id>...
 tg delete-history @x --yes
+tg delete-history @myforum --topic 42 --yes   # clear one topic
+tg topics delete @myforum 42 --yes            # delete the topic itself
 ```
 
 ## Multiple accounts

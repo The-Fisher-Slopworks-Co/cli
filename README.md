@@ -80,6 +80,8 @@ Run `tg --help` for the full, grouped command list, or `tg <command> --help` for
 - **Messaging:** `send`, `reply`, `edit`, `delete`, `delete-history`, `forward`,
   `history`, `search` (`--global`), `read`, `pin`/`unpin`/`unpin-all`/`pinned`,
   `react`/`unreact`/`reactions`, `draft`/`drafts`, `schedule`, `poll`, `link`, `context`.
+  Anything that reads or writes messages also takes `--topic <id>` to work inside
+  a single forum topic.
 - **Media:** `upload` (with `--type` video/audio/voice/gif/sticker), `album`, `download`,
   `stickers`.
 - **Chats & contacts:** `chats list`, `chat get`/`full`, `mute`/`unmute`,
@@ -87,7 +89,8 @@ Run `tg --help` for the full, grouped command list, or `tg <command> --help` for
   search, add, delete, block/unblock, blocked, import).
 - **Groups & channels:** `create-group`, `create-channel`, `invite`, `leave`,
   `participants`/`admins`/`banned`, `promote`/`demote`, `ban`/`unban`, `slow-mode`,
-  `set-title`/`set-about`/`set-photo`, `invite-link`/`join-link`, `topics`,
+  `set-title`/`set-about`/`set-photo`, `invite-link`/`join-link`,
+  `topics` (list/get/create/edit/close/reopen/hide/pin/reorder/delete/enable),
   `recent-actions`.
 - **Profile & folders:** `profile` (update, set/delete photo, status), `folders`
   (list, create, add-chat/remove-chat, delete, reorder).
@@ -103,6 +106,25 @@ Run `tg --help` for the full, grouped command list, or `tg <command> --help` for
 | `-c, --config <path>` | config file to use |
 | `--proxy <url>` | `socks5://…` or `tg://proxy?…` (MTProxy) |
 | `--test` | connect to the Telegram test server (persisted by `tg init --test`) |
+
+## Forum topics
+
+Supergroups with topics enabled are a two-coordinate space: a peer plus a topic
+id. `tg topics` manages the topics themselves, and every messaging command takes
+`--topic <id>` to work inside one.
+
+```console
+$ tg topics list @myforum                  # ids, titles, unread counts, flags
+$ tg topics create @myforum "Deploys"      # prints the new topic's id
+$ tg send --peer @myforum --topic 42 "status update"
+$ tg history @myforum --topic 42
+$ tg history https://t.me/myforum/42/1337  # a topic link works as the peer
+$ tg topics close @myforum 42
+```
+
+The General topic is id 1. Without `--topic`, reads span every topic; each
+message carries `topic_id` in JSON output. `tg chats list` marks forums with a
+`forum` flag.
 
 ## Multiple accounts
 
