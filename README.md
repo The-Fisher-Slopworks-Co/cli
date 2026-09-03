@@ -50,7 +50,9 @@ Bot login still works too: provide a token via `tg init --token <bot-token>` and
 - **Structured output:** `--output json` (`-o json`) on any command emits a stable
   envelope `{"schema":1,"data":…}` on stdout. Logs, prompts and progress go to stderr.
 - **Consistent peers:** every `<peer>` accepts `me`/`self`, `@username`, a phone number,
-  or a `t.me/…` link. Resolved access-hashes are cached locally.
+  a `t.me/…` link, or `id:<n>` — the numeric `id` from `tg chats list -o json`, which is
+  how you address a chat that has no username. Resolved access-hashes are cached
+  locally, so `id:` works for any peer the cache has already seen.
 - **Safety:** destructive actions (`delete`, `delete-history`, `unpin-all`) require `--yes`.
 - **Shell completion:** `tg completion bash|zsh|fish|powershell`, with dynamic completion
   for peers, accounts, output format and enum flags.
@@ -58,6 +60,8 @@ Bot login still works too: provide a token via `tg init --token <bot-token>` and
 ```console
 $ tg chats list --output json | jq '.data.chats[].peer.username'
 $ tg history @durov --limit 20 -o json
+$ tg history id:2201861038 --limit 20     # a chat with no username, by numeric id
+$ tg resolve id:2201861038                # what does that id refer to?
 ```
 
 ### Agent skill
@@ -95,7 +99,7 @@ Run `tg --help` for the full, grouped command list, or `tg <command> --help` for
 - **Profile & folders:** `profile` (update, set/delete photo, status), `folders`
   (list, create, add-chat/remove-chat, delete, reorder).
 - **Realtime:** `watch [peer]` streams new messages as JSON lines; `wait [peer]` blocks
-  until the next message (with `--timeout`).
+  until the next message (with `--timeout`). Both take `--topic` to follow one forum topic.
 
 ## Global flags
 
@@ -115,6 +119,7 @@ id. `tg topics` manages the topics themselves, and every messaging command takes
 
 ```console
 $ tg topics list @myforum                  # ids, titles, unread counts, flags
+$ tg topics list id:4483395565             # a forum with no username, by numeric id
 $ tg topics list @myforum --all            # every topic, however many
 $ tg topics create @myforum "Deploys"      # prints the new topic's id
 $ tg send --peer @myforum --topic 42 "status update"

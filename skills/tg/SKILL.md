@@ -41,8 +41,10 @@ login needs the user. `tg init` is safe to run yourself.
 - **Peers** (`--peer`/`<peer>`) accept: `me` or `self` (Saved Messages),
   `@username`, a phone number, a `t.me/…` link, or **`id:<n>`** — the `id`
   field from `chats list -o json`, which is how you address a chat that has no
-  username. Keep the `id:` prefix: a bare number is parsed as a username and
-  fails with `contact not found`. A chat title is never a peer (`tg history
+  username. Every command that takes a peer accepts every form — `id:` included,
+  in any peer position (`tg ban <peer> id:<n>` targets the user by id). Keep the
+  `id:` prefix: a bare number is parsed as a username and fails with
+  `contact not found`. A chat title is never a peer (`tg history
   "Some Group"` cannot work — peers are usernames, not names). Resolved
   access-hashes are cached locally, so reuse the same form.
 - **`id:` reads the local access-hash cache**, so populate it once per machine
@@ -82,6 +84,9 @@ tg chats list -o json | jq -r '.data.chats[].peer.username // empty'
 # A chat with no username: cache it once, then address it by numeric id
 tg chats list >/dev/null
 tg history id:4483395565 --limit 20 -o json
+
+# What is that id? resolve reports type, title and username (from the cache)
+tg resolve id:4483395565 -o json
 
 # Read recent history / search (peer is positional)
 tg history @gotd_test --limit 20 -o json
