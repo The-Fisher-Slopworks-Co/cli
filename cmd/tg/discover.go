@@ -12,11 +12,13 @@ import (
 
 func (a *app) newResolveCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "resolve <username>",
-		Short:   "Resolve a username to a peer",
+		Use:     "resolve <peer>",
+		Short:   "Resolve a peer to its id, type and name",
 		GroupID: groupChats,
-		Long:    "Resolve a @username (or t.me link) to its peer id, type and name.",
-		Example: "  tg resolve @durov\n  tg resolve durov --output json",
+		Long: "Resolve a @username (or t.me link) to its peer id, type and name.\n" +
+			"Also accepts id:<n>, which looks the peer up in the local cache — handy\n" +
+			"for checking what a numeric id from `tg chats list` refers to.",
+		Example: "  tg resolve @durov\n  tg resolve durov --output json\n  tg resolve id:2201861038",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.run(cmd.Context(), runParams{auth: authUser}, func(ctx context.Context, api *tg.Client) error {
@@ -24,7 +26,7 @@ func (a *app) newResolveCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				p, err := m.Resolve(ctx, args[0])
+				p, err := resolvePeerArg(ctx, m, args[0])
 				if err != nil {
 					return errors.Wrapf(err, "resolve %q", args[0])
 				}
@@ -90,7 +92,7 @@ func (a *app) newSubscribeCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				p, err := m.Resolve(ctx, args[0])
+				p, err := resolvePeerArg(ctx, m, args[0])
 				if err != nil {
 					return errors.Wrapf(err, "resolve %q", args[0])
 				}

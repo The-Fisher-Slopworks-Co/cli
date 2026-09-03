@@ -26,7 +26,7 @@ func (a *app) newSetTitleCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				p, err := m.Resolve(ctx, args[0])
+				p, err := resolvePeerArg(ctx, m, args[0])
 				if err != nil {
 					return errors.Wrapf(err, "resolve %q", args[0])
 				}
@@ -97,7 +97,7 @@ func (a *app) newSetPhotoCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				p, err := m.Resolve(ctx, args[0])
+				p, err := resolvePeerArg(ctx, m, args[0])
 				if err != nil {
 					return errors.Wrapf(err, "resolve %q", args[0])
 				}
