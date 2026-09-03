@@ -142,7 +142,7 @@ func (a *app) banUnbanCmd(use, short string, ban bool) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				p, err := m.Resolve(ctx, args[1])
+				p, err := resolvePeerArg(ctx, m, args[1])
 				if err != nil {
 					return errors.Wrapf(err, "resolve %q", args[1])
 				}
