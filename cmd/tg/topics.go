@@ -74,8 +74,9 @@ func (t topicItem) flags() []string {
 // topicsResult is the result of `tg topics list` and `tg topics get`.
 type topicsResult struct {
 	Topics []topicItem `json:"topics"`
-	// Count is the total number of topics in the forum, which can exceed the
-	// number returned.
+	// Count is the server's total for the query, which can exceed the number
+	// returned. It does not include the General topic: that one exists
+	// implicitly in every forum, so it is listed but never counted.
 	Count int `json:"count,omitempty"`
 }
 
@@ -148,9 +149,10 @@ func newTopicsResult(res *tg.MessagesForumTopics) topicsResult {
 // nextTopicOffsets derives the pagination offsets for the page after res, from
 // its last topic. It reports false when there is nothing left to page from.
 //
-// Telegram pages forum topics by the position of the last topic's most recent
-// message, so the date has to come from that message rather than from the topic
-// itself.
+// The offset date has to match whatever order the server used, which it reports
+// in order_by_create_date: the topic's own date when topics come ordered by
+// creation, and otherwise the date of the message that top_message points at.
+// Using the wrong one moves the page boundary and duplicates or skips topics.
 func nextTopicOffsets(res *tg.MessagesForumTopics) (date, id, topic int, ok bool) {
 	var last *tg.ForumTopic
 	for _, tc := range res.Topics {
@@ -162,17 +164,41 @@ func nextTopicOffsets(res *tg.MessagesForumTopics) (date, id, topic int, ok bool
 		return 0, 0, 0, false
 	}
 	date = last.Date
-	for _, mc := range res.Messages {
-		if m, isMsg := mc.(*tg.Message); isMsg && m.ID == last.TopMessage {
-			date = m.Date
-			break
+	if !res.OrderByCreateDate {
+		for _, mc := range res.Messages {
+			if m, isMsg := mc.(*tg.Message); isMsg && m.ID == last.TopMessage {
+				date = m.Date
+				break
+			}
 		}
 	}
 	return date, last.TopMessage, last.ID, true
 }
 
+// countedTopics reports how many of the collected topics the server includes in
+// the total it reports as count: the General topic exists implicitly in every
+// forum, so it is listed but never counted, and a deleted entry carries nothing
+// to count. Undercounting here only costs one extra request; overcounting would
+// end the walk early, so borderline entries are left out.
+func countedTopics(topics []topicItem) int {
+	n := 0
+	for _, t := range topics {
+		if t.ID != generalTopicID && !t.Deleted {
+			n++
+		}
+	}
+	return n
+}
+
 // listTopics pages through a forum's topics until limit is reached or the forum
-// runs out.
+// runs out. A limit of zero or less fetches every topic.
+//
+// Note what does *not* end the walk: a page shorter than the one asked for.
+// Telegram does not document its per-page ceiling, so a short page is
+// indistinguishable from the end of the list, and treating it as the end
+// silently truncates the result on any forum whose pages the server caps below
+// the requested limit. The walk ends on an empty page instead, and count — the
+// server's own total for the query — is what saves the extra round trip.
 func listTopics(
 	ctx context.Context,
 	api *tg.Client,
@@ -180,17 +206,23 @@ func listTopics(
 	query string,
 	limit int,
 ) (topicsResult, error) {
+	unlimited := limit <= 0
+
 	var (
 		out                          topicsResult
 		offsetDate, offsetID, offset int
 	)
-	for len(out.Topics) < limit {
+	for unlimited || len(out.Topics) < limit {
+		page := topicsPageLimit
+		if !unlimited {
+			page = min(limit-len(out.Topics), topicsPageLimit)
+		}
 		req := &tg.MessagesGetForumTopicsRequest{
 			Peer:        peer,
 			OffsetDate:  offsetDate,
 			OffsetID:    offsetID,
 			OffsetTopic: offset,
-			Limit:       min(limit-len(out.Topics), topicsPageLimit),
+			Limit:       page,
 		}
 		if query != "" {
 			req.SetQ(query)
@@ -199,20 +231,26 @@ func listTopics(
 		if err != nil {
 			return topicsResult{}, errors.Wrap(err, "messages.getForumTopics")
 		}
-		page := newTopicsResult(res)
-		out.Count = page.Count
-		out.Topics = append(out.Topics, page.Topics...)
+		got := newTopicsResult(res)
+		out.Count = got.Count
+		out.Topics = append(out.Topics, got.Topics...)
 
+		// An empty page is the end of the list.
+		if len(got.Topics) == 0 {
+			break
+		}
+		// The server has handed over everything it counts for this query.
+		if out.Count > 0 && countedTopics(out.Topics) >= out.Count {
+			break
+		}
 		nextDate, nextID, nextTopic, ok := nextTopicOffsets(res)
-		// Stop on an empty page, on a short page (no more to fetch), and on
-		// offsets that did not move — any of which would otherwise loop forever.
-		if !ok || len(page.Topics) == 0 || len(res.Topics) < req.Limit ||
-			(nextDate == offsetDate && nextID == offsetID && nextTopic == offset) {
+		// Offsets that do not move would loop forever.
+		if !ok || (nextDate == offsetDate && nextID == offsetID && nextTopic == offset) {
 			break
 		}
 		offsetDate, offsetID, offset = nextDate, nextID, nextTopic
 	}
-	if len(out.Topics) > limit {
+	if !unlimited && len(out.Topics) > limit {
 		out.Topics = out.Topics[:limit]
 	}
 	return out, nil
@@ -315,6 +353,7 @@ func (a *app) newTopicsListCmd() *cobra.Command {
 	var (
 		limit int
 		query string
+		all   bool
 	)
 
 	cmd := &cobra.Command{
@@ -324,11 +363,23 @@ func (a *app) newTopicsListCmd() *cobra.Command {
 		ValidArgsFunction: peerArgCompletion,
 		Long: `List a forum's topics newest-first, with unread counts and
 pinned/closed/hidden flags. Use the reported id with --topic on the messaging
-commands.`,
+commands.
+
+JSON output carries "count", the server's total for the query, which is what to
+compare against when checking for more. It does not include the General topic
+(id 1): that one exists implicitly in every forum, so it is listed but not
+counted.`,
 		Example: `  tg topics list @myforum
-  tg topics list @myforum --limit 200 --output json
+  tg topics list @myforum --all --output json
+  tg topics list @myforum --limit 200
   tg topics list @myforum --query "release"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if all && cmd.Flags().Changed("limit") {
+				return errors.New("--all and --limit are mutually exclusive")
+			}
+			if all {
+				limit = 0
+			}
 			return a.run(cmd.Context(), runParams{auth: authUser}, func(ctx context.Context, api *tg.Client) error {
 				return a.withForum(ctx, api, args[0], func(peer tg.InputPeerClass) error {
 					res, err := listTopics(ctx, api, peer, query, limit)
@@ -343,6 +394,7 @@ commands.`,
 
 	fs := cmd.Flags()
 	fs.IntVarP(&limit, "limit", "n", topicsPageLimit, "maximum number of topics to list")
+	fs.BoolVar(&all, "all", false, "list every topic, however many there are")
 	fs.StringVarP(&query, "query", "q", "", "only topics whose title matches this query")
 
 	return cmd

@@ -95,6 +95,7 @@ Forum topics (supergroups with topics enabled — `tg chats list` flags them
 ```bash
 # Discover topics and their ids
 tg topics list @myforum -o json | jq -r '.data.topics[] | "\(.id)\t\(.title)"'
+tg topics list @myforum --all -o json     # every topic, however many
 
 # Read and post inside one topic
 tg history @myforum --topic 42 -o json
@@ -118,6 +119,11 @@ tg topics close @myforum 42          # also: reopen, pin, unpin, edit --title, g
 `history`, `search` and `watch` on a forum **without** `--topic` return every
 topic mixed together; each message carries `topic_id` in JSON so you can tell
 them apart.
+
+`tg topics list` defaults to 100 topics; pass `--all` for the rest. Its JSON
+`count` is the server's total for the query — compare it against the number of
+returned topics to detect more. It excludes the General topic (id 1), which
+exists implicitly in every forum and is listed but never counted.
 
 Destructive (only when the user explicitly asks):
 

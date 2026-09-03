@@ -115,6 +115,7 @@ id. `tg topics` manages the topics themselves, and every messaging command takes
 
 ```console
 $ tg topics list @myforum                  # ids, titles, unread counts, flags
+$ tg topics list @myforum --all            # every topic, however many
 $ tg topics create @myforum "Deploys"      # prints the new topic's id
 $ tg send --peer @myforum --topic 42 "status update"
 $ tg history @myforum --topic 42
@@ -124,7 +125,8 @@ $ tg topics close @myforum 42
 
 The General topic is id 1. Without `--topic`, reads span every topic; each
 message carries `topic_id` in JSON output. `tg chats list` marks forums with a
-`forum` flag.
+`forum` flag. In `topics list` JSON, `count` is the server's total for the query
+and excludes the General topic, which is listed but never counted.
 
 ## Multiple accounts
 

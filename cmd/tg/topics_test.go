@@ -12,6 +12,25 @@ import (
 	"github.com/gotd/td/tg"
 )
 
+// topicMsgID is the top_message id topicPage gives topic id n.
+func topicMsgID(n int) int { return 1000 + n }
+
+// topicPage builds n consecutive topics starting at id `from`, shaped well
+// enough to encode over the mock invoker.
+func topicPage(from, n int) []tg.ForumTopicClass {
+	out := make([]tg.ForumTopicClass, 0, n)
+	for i := from; i < from+n; i++ {
+		out = append(out, &tg.ForumTopic{
+			ID:         i,
+			Date:       i,
+			TopMessage: topicMsgID(i),
+			Peer:       &tg.PeerChannel{ChannelID: 1},
+			FromID:     &tg.PeerUser{UserID: 7},
+		})
+	}
+	return out
+}
+
 func TestNewTopicsResult(t *testing.T) {
 	full := &tg.ForumTopic{
 		ID:                  42,
@@ -106,6 +125,24 @@ func TestNextTopicOffsets(t *testing.T) {
 		}
 	})
 
+	t.Run("orders by create date: uses the topic's date", func(t *testing.T) {
+		// With order_by_create_date set the server ordered by forumTopic.date,
+		// so the offset must use that even though top_message is resolvable.
+		date, id, topic, ok := nextTopicOffsets(&tg.MessagesForumTopics{
+			OrderByCreateDate: true,
+			Topics: []tg.ForumTopicClass{
+				&tg.ForumTopic{ID: 2, Date: 20, TopMessage: 200},
+			},
+			Messages: []tg.MessageClass{&tg.Message{ID: 200, Date: 999}},
+		})
+		if !ok {
+			t.Fatal("no offsets")
+		}
+		if date != 20 || id != 200 || topic != 2 {
+			t.Errorf("got date=%d id=%d topic=%d, want 20/200/2", date, id, topic)
+		}
+	})
+
 	t.Run("falls back to the topic's own date", func(t *testing.T) {
 		date, _, _, ok := nextTopicOffsets(&tg.MessagesForumTopics{
 			Topics: []tg.ForumTopicClass{&tg.ForumTopic{ID: 2, Date: 20, TopMessage: 200}},
@@ -132,10 +169,7 @@ func TestListTopicsLimit(t *testing.T) {
 			return nil, errors.Errorf("unexpected request %T", req)
 		}
 		gotLimit = r.Limit
-		return &tg.MessagesForumTopics{
-			Count:  1,
-			Topics: []tg.ForumTopicClass{&tg.ForumTopic{ID: 1, Title: "General", Peer: &tg.PeerChannel{ChannelID: 1}, FromID: &tg.PeerUser{UserID: 7}}},
-		}, nil
+		return &tg.MessagesForumTopics{Count: 1, Topics: topicPage(5, 1)}, nil
 	})
 
 	res, err := listTopics(context.Background(), api, &tg.InputPeerChannel{ChannelID: 1}, "", 30)
@@ -150,8 +184,9 @@ func TestListTopicsLimit(t *testing.T) {
 	}
 }
 
-// TestListTopicsPaginates asserts a limit larger than one page is fetched in
-// several requests, advancing the offsets each time.
+// TestListTopicsPaginates asserts a forum larger than one page is walked to the
+// end, advancing the offsets each time, and that the server's count ends the
+// walk without an extra empty request.
 func TestListTopicsPaginates(t *testing.T) {
 	var reqs []*tg.MessagesGetForumTopicsRequest
 	api := newFuncAPI(t, func(req bin.Encoder) (bin.Encoder, error) {
@@ -160,19 +195,10 @@ func TestListTopicsPaginates(t *testing.T) {
 			return nil, errors.Errorf("unexpected request %T", req)
 		}
 		reqs = append(reqs, r)
-
-		// One full page, then a short one that ends the walk.
 		if len(reqs) == 1 {
-			topics := make([]tg.ForumTopicClass, 0, topicsPageLimit)
-			for i := 1; i <= topicsPageLimit; i++ {
-				topics = append(topics, &tg.ForumTopic{ID: i, Date: i, TopMessage: 1000 + i, Peer: &tg.PeerChannel{ChannelID: 1}, FromID: &tg.PeerUser{UserID: 7}})
-			}
-			return &tg.MessagesForumTopics{Count: 120, Topics: topics}, nil
+			return &tg.MessagesForumTopics{Count: 101, Topics: topicPage(2, topicsPageLimit)}, nil
 		}
-		return &tg.MessagesForumTopics{
-			Count:  120,
-			Topics: []tg.ForumTopicClass{&tg.ForumTopic{ID: 101, Date: 101, TopMessage: 1101, Peer: &tg.PeerChannel{ChannelID: 1}, FromID: &tg.PeerUser{UserID: 7}}},
-		}, nil
+		return &tg.MessagesForumTopics{Count: 101, Topics: topicPage(2+topicsPageLimit, 1)}, nil
 	})
 
 	res, err := listTopics(context.Background(), api, &tg.InputPeerChannel{ChannelID: 1}, "", 120)
@@ -186,14 +212,143 @@ func TestListTopicsPaginates(t *testing.T) {
 		t.Errorf("limits = %d, %d; want %d, 20", reqs[0].Limit, reqs[1].Limit, topicsPageLimit)
 	}
 	// The second page must continue from the last topic of the first.
-	if reqs[1].OffsetTopic != topicsPageLimit || reqs[1].OffsetID != 1000+topicsPageLimit {
-		t.Errorf("offsets = topic %d, id %d", reqs[1].OffsetTopic, reqs[1].OffsetID)
+	lastID := 1 + topicsPageLimit
+	if reqs[1].OffsetTopic != lastID || reqs[1].OffsetID != topicMsgID(lastID) {
+		t.Errorf("offsets = topic %d, id %d; want %d, %d",
+			reqs[1].OffsetTopic, reqs[1].OffsetID, lastID, topicMsgID(lastID))
 	}
 	if len(res.Topics) != topicsPageLimit+1 {
 		t.Errorf("got %d topics, want %d", len(res.Topics), topicsPageLimit+1)
 	}
-	if res.Count != 120 {
-		t.Errorf("count = %d, want 120", res.Count)
+	if res.Count != 101 {
+		t.Errorf("count = %d, want 101", res.Count)
+	}
+}
+
+// TestListTopicsShortPageIsNotTheEnd is the regression test for silent
+// truncation: Telegram does not document its per-page ceiling, so a page
+// shorter than the one requested must not be read as the end of the list.
+func TestListTopicsShortPageIsNotTheEnd(t *testing.T) {
+	// A 60-topic forum whose pages the server caps at 20, well below the
+	// requested limit. id 1 is General, so the server counts 59.
+	const (
+		total   = 60
+		pageCap = 20
+	)
+
+	var reqs int
+	api := newFuncAPI(t, func(req bin.Encoder) (bin.Encoder, error) {
+		r, ok := req.(*tg.MessagesGetForumTopicsRequest)
+		if !ok {
+			return nil, errors.Errorf("unexpected request %T", req)
+		}
+		reqs++
+		from := r.OffsetTopic + 1
+		n := min(pageCap, total-r.OffsetTopic)
+		if n <= 0 {
+			return &tg.MessagesForumTopics{Count: total - 1}, nil
+		}
+		return &tg.MessagesForumTopics{Count: total - 1, Topics: topicPage(from, n)}, nil
+	})
+
+	res, err := listTopics(context.Background(), api, &tg.InputPeerChannel{ChannelID: 1}, "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Topics) != total {
+		t.Errorf("got %d topics, want all %d (a short page must not end the walk)", len(res.Topics), total)
+	}
+	if reqs != 3 {
+		t.Errorf("made %d requests, want 3", reqs)
+	}
+}
+
+// TestListTopicsStopsOnEmptyPage asserts the walk still terminates when count
+// carries no usable total, which is the correctness backstop.
+func TestListTopicsStopsOnEmptyPage(t *testing.T) {
+	var reqs int
+	api := newFuncAPI(t, func(req bin.Encoder) (bin.Encoder, error) {
+		r, ok := req.(*tg.MessagesGetForumTopicsRequest)
+		if !ok {
+			return nil, errors.Errorf("unexpected request %T", req)
+		}
+		reqs++
+		if r.OffsetTopic >= 5 {
+			return &tg.MessagesForumTopics{}, nil
+		}
+		return &tg.MessagesForumTopics{Topics: topicPage(1, 5)}, nil
+	})
+
+	res, err := listTopics(context.Background(), api, &tg.InputPeerChannel{ChannelID: 1}, "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Topics) != 5 || reqs != 2 {
+		t.Errorf("got %d topics in %d requests, want 5 in 2", len(res.Topics), reqs)
+	}
+}
+
+// TestListTopicsGeneralIsNotCounted guards the count rule against the General
+// topic, which is listed but excluded from the server's total. Counting it
+// would end the walk one topic early.
+func TestListTopicsGeneralIsNotCounted(t *testing.T) {
+	var reqs int
+	api := newFuncAPI(t, func(req bin.Encoder) (bin.Encoder, error) {
+		r, ok := req.(*tg.MessagesGetForumTopicsRequest)
+		if !ok {
+			return nil, errors.Errorf("unexpected request %T", req)
+		}
+		reqs++
+		if r.OffsetTopic >= 3 {
+			return &tg.MessagesForumTopics{Count: 2}, nil
+		}
+		// ids 1..3, where id 1 is General: three listed, two counted.
+		return &tg.MessagesForumTopics{Count: 2, Topics: topicPage(1, 3)}, nil
+	})
+
+	res, err := listTopics(context.Background(), api, &tg.InputPeerChannel{ChannelID: 1}, "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Topics) != 3 {
+		t.Errorf("got %d topics, want 3", len(res.Topics))
+	}
+	if reqs != 1 {
+		t.Errorf("made %d requests, want 1 (count reached after the first page)", reqs)
+	}
+}
+
+// TestListTopicsUnlimited asserts a non-positive limit means "everything", which
+// is what --all passes in.
+func TestListTopicsUnlimited(t *testing.T) {
+	const total = 150
+
+	var reqs int
+	api := newFuncAPI(t, func(req bin.Encoder) (bin.Encoder, error) {
+		r, ok := req.(*tg.MessagesGetForumTopicsRequest)
+		if !ok {
+			return nil, errors.Errorf("unexpected request %T", req)
+		}
+		reqs++
+		if r.Limit != topicsPageLimit {
+			t.Errorf("unlimited request limit = %d, want %d", r.Limit, topicsPageLimit)
+		}
+		n := min(topicsPageLimit, total-r.OffsetTopic)
+		if n <= 0 {
+			return &tg.MessagesForumTopics{Count: total - 1}, nil
+		}
+		return &tg.MessagesForumTopics{Count: total - 1, Topics: topicPage(r.OffsetTopic+1, n)}, nil
+	})
+
+	res, err := listTopics(context.Background(), api, &tg.InputPeerChannel{ChannelID: 1}, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Topics) != total {
+		t.Errorf("got %d topics, want %d", len(res.Topics), total)
+	}
+	if reqs != 2 {
+		t.Errorf("made %d requests, want 2", reqs)
 	}
 }
 
