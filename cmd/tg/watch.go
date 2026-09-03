@@ -25,11 +25,13 @@ type watchEvent struct {
 }
 
 // messageStream turns incoming new-message updates into watchEvents, filtered by
-// an optional peer id, delivered to onEvent. Safe for concurrent dispatch.
+// an optional peer id and forum topic, delivered to onEvent. Safe for concurrent
+// dispatch.
 type messageStream struct {
-	filterID int64
-	onEvent  func(watchEvent)
-	mu       sync.Mutex
+	filterID    int64
+	filterTopic int
+	onEvent     func(watchEvent)
+	mu          sync.Mutex
 }
 
 func (s *messageStream) handle(msg tg.MessageClass, e tg.Entities) {
@@ -39,12 +41,29 @@ func (s *messageStream) handle(msg tg.MessageClass, e tg.Entities) {
 	}
 	ent := peer.EntitiesFromUpdate(e)
 	ev := watchEvent{Peer: describePeer(m.PeerID, ent), Message: buildMessageItem(m, ent)}
-	if s.filterID != 0 && ev.Peer.ID != s.filterID {
+	if !s.match(ev) {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onEvent(ev)
+}
+
+// match reports whether an event passes the peer and topic filters.
+func (s *messageStream) match(ev watchEvent) bool {
+	if s.filterID != 0 && ev.Peer.ID != s.filterID {
+		return false
+	}
+	if s.filterTopic == 0 {
+		return true
+	}
+	// Messages posted straight to the General topic carry no reply header, so
+	// an absent topic means General rather than "unknown".
+	topic := ev.Message.TopicID
+	if topic == 0 {
+		topic = generalTopicID
+	}
+	return topic == s.filterTopic
 }
 
 // register wires the stream onto an update dispatcher.
@@ -60,20 +79,31 @@ func (s *messageStream) register(d tg.UpdateDispatcher) {
 }
 
 // resolveFilterFor resolves an optional peer argument to a filter id, using the
-// given account's peer cache.
-func (a *app) resolveFilterFor(ctx context.Context, api *tg.Client, st *accountState, args []string) (int64, error) {
+// given account's peer cache. It also returns any topic id carried by the
+// argument (a t.me topic link).
+func (a *app) resolveFilterFor(
+	ctx context.Context,
+	api *tg.Client,
+	st *accountState,
+	args []string,
+	topic topicOptions,
+) (int64, int, error) {
 	if len(args) == 0 {
-		return 0, nil
+		if topic.id != 0 {
+			return 0, 0, errors.New("--topic needs a peer argument")
+		}
+		return 0, 0, nil
 	}
+	peerArg, topicID := topic.resolve(args[0])
 	m, err := a.managerFor(api, st)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	p, err := m.Resolve(ctx, args[0])
+	p, err := resolvePeerArg(ctx, m, peerArg)
 	if err != nil {
-		return 0, errors.Wrapf(err, "resolve %q", args[0])
+		return 0, 0, errors.Wrapf(err, "resolve %q", peerArg)
 	}
-	return p.ID(), nil
+	return p.ID(), topicID, nil
 }
 
 // emitLine writes one streamed event (JSON line or text line) to stdout. When
@@ -104,12 +134,15 @@ func emitLine(format output.Format, account string, ev watchEvent) {
 }
 
 func (a *app) newWatchCmd() *cobra.Command {
+	var topic topicOptions
+
 	cmd := &cobra.Command{
-		Use:               "watch [peer]",
-		Short:             "Stream new messages as they arrive",
-		GroupID:           groupMessaging,
-		Long:              "Stream incoming messages (optionally for one peer) as JSON lines until interrupted.",
-		Example:           "  tg watch\n  tg watch @durov --output json",
+		Use:     "watch [peer]",
+		Short:   "Stream new messages as they arrive",
+		GroupID: groupMessaging,
+		Long: `Stream incoming messages (optionally for one peer, or one forum topic
+of it) as JSON lines until interrupted.`,
+		Example:           "  tg watch\n  tg watch @durov --output json\n  tg watch @myforum --topic 42",
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: peerArgCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -118,27 +151,30 @@ func (a *app) newWatchCmd() *cobra.Command {
 				return err
 			}
 			if len(labels) > 1 {
-				return a.watchAll(cmd.Context(), labels, args)
+				return a.watchAll(cmd.Context(), labels, args, topic)
 			}
-			return a.watchOne(cmd.Context(), labels[0], "", args)
+			return a.watchOne(cmd.Context(), labels[0], "", args, topic)
 		},
 	}
+
+	topic.register(cmd.Flags())
+
 	return cmd
 }
 
 // watchOne streams messages from a single account. The label header (account)
 // is non-empty only in multi-account mode.
-func (a *app) watchOne(ctx context.Context, label, header string, args []string) error {
+func (a *app) watchOne(ctx context.Context, label, header string, args []string, topic topicOptions) error {
 	st, err := a.accountState(label)
 	if err != nil {
 		return err
 	}
-	return a.watchWith(ctx, st, header, args, nil)
+	return a.watchWith(ctx, st, header, args, topic, nil)
 }
 
 // watchAll streams messages from every account concurrently, merged into one
 // labeled stream.
-func (a *app) watchAll(ctx context.Context, labels, args []string) error {
+func (a *app) watchAll(ctx context.Context, labels, args []string, topic topicOptions) error {
 	var mu sync.Mutex
 	g, ctx := errgroup.WithContext(ctx)
 	for _, label := range labels {
@@ -147,7 +183,7 @@ func (a *app) watchAll(ctx context.Context, labels, args []string) error {
 			return err
 		}
 		g.Go(func() error {
-			if err := a.watchWith(ctx, st, st.label, args, &mu); err != nil {
+			if err := a.watchWith(ctx, st, st.label, args, topic, &mu); err != nil {
 				return errors.Wrapf(err, "account %q", st.label)
 			}
 			return nil
@@ -158,20 +194,28 @@ func (a *app) watchAll(ctx context.Context, labels, args []string) error {
 
 // watchWith connects to one account and streams until ctx is done. mu, if set,
 // serializes stdout across concurrent accounts.
-func (a *app) watchWith(ctx context.Context, st *accountState, header string, args []string, mu *sync.Mutex) error {
+func (a *app) watchWith(
+	ctx context.Context,
+	st *accountState,
+	header string,
+	args []string,
+	topic topicOptions,
+	mu *sync.Mutex,
+) error {
 	format := a.printer.Format()
 	return a.connectWith(ctx, st, runParams{auth: authUser, updates: true},
 		func(ctx context.Context, client *telegram.Client, d tg.UpdateDispatcher) error {
 			if err := requireAuth(ctx, client); err != nil {
 				return err
 			}
-			filterID, err := a.resolveFilterFor(ctx, client.API(), st, args)
+			filterID, filterTopic, err := a.resolveFilterFor(ctx, client.API(), st, args, topic)
 			if err != nil {
 				return err
 			}
 
 			stream := &messageStream{
-				filterID: filterID,
+				filterID:    filterID,
+				filterTopic: filterTopic,
 				onEvent: func(ev watchEvent) {
 					if mu != nil {
 						mu.Lock()

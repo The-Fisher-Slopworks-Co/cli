@@ -13,6 +13,7 @@ func (a *app) newForwardCmd() *cobra.Command {
 	var (
 		from       string
 		dropAuthor bool
+		topic      topicOptions
 	)
 
 	cmd := &cobra.Command{
@@ -23,7 +24,8 @@ func (a *app) newForwardCmd() *cobra.Command {
 		Long: `Forward one or more messages from a source chat (--from) to a target peer.
 Peers are me/self, @username, phone, or a t.me link.`,
 		Example: `  tg forward @friend --from @channel 100 101 102
-  tg forward me --from @durov 12345`,
+  tg forward me --from @durov 12345
+  tg forward @myforum --topic 42 --from @channel 100`,
 		Args:              cobra.MinimumNArgs(2),
 		ValidArgsFunction: peerArgCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -41,11 +43,15 @@ Peers are me/self, @username, phone, or a t.me link.`,
 				if err != nil {
 					return err
 				}
-				sender, _, err := a.sender(api)
+				toArg, topicID := topic.resolve(args[0])
+				sender, _, err := a.senderIn(api, topicID)
 				if err != nil {
 					return err
 				}
-				bf, err := builderFor(ctx, m, sender, args[0])
+				if err := requireForum(ctx, m, toArg, topicID); err != nil {
+					return err
+				}
+				bf, err := builderFor(ctx, m, sender, toArg)
 				if err != nil {
 					return err
 				}
@@ -57,7 +63,7 @@ Peers are me/self, @username, phone, or a t.me link.`,
 				if _, err := fwd.Send(ctx); err != nil {
 					return errors.Wrap(err, "forward")
 				}
-				return a.printer.Emit(sentResult{Peer: args[0], MessageID: ids[len(ids)-1]})
+				return a.printer.Emit(sentResult{Peer: toArg, MessageID: ids[len(ids)-1]})
 			})
 		},
 	}
@@ -65,6 +71,7 @@ Peers are me/self, @username, phone, or a t.me link.`,
 	fs := cmd.Flags()
 	fs.StringVar(&from, "from", "", "source peer to forward from (required)")
 	fs.BoolVar(&dropAuthor, "drop-author", false, "forward without quoting the original author")
+	topic.register(fs)
 	_ = cmd.MarkFlagRequired("from")
 
 	return cmd

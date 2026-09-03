@@ -61,3 +61,25 @@ func TestDeleteMessagesChannel(t *testing.T) {
 		t.Errorf("unexpected request: %+v", chReq)
 	}
 }
+
+// TestDeleteHistoryTopic asserts --topic deletes just the topic's thread rather
+// than the whole chat.
+func TestDeleteHistoryTopic(t *testing.T) {
+	var got *tg.MessagesDeleteTopicHistoryRequest
+	api := newFuncAPI(t, func(req bin.Encoder) (bin.Encoder, error) {
+		r, ok := req.(*tg.MessagesDeleteTopicHistoryRequest)
+		if !ok {
+			return nil, errors.Errorf("unexpected request %T", req)
+		}
+		got = r
+		return &tg.MessagesAffectedHistory{}, nil
+	})
+
+	err := deleteHistory(context.Background(), api, &tg.InputPeerChannel{ChannelID: 10}, 42, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.TopMsgID != 42 {
+		t.Errorf("unexpected request: %+v", got)
+	}
+}

@@ -22,8 +22,20 @@ func (r readResult) MarshalText(w io.Writer) error {
 	return err
 }
 
-// markRead marks the peer's history as read up to the latest message.
-func markRead(ctx context.Context, api *tg.Client, peer tg.InputPeerClass) error {
+// markRead marks the peer's history as read up to the latest message. A
+// non-zero topic marks just that forum topic, which Telegram tracks as the
+// discussion thread of the topic's root message.
+func markRead(ctx context.Context, api *tg.Client, peer tg.InputPeerClass, topic int) error {
+	if topic != 0 {
+		if _, err := api.MessagesReadDiscussion(ctx, &tg.MessagesReadDiscussionRequest{
+			Peer:      peer,
+			MsgID:     topic,
+			ReadMaxID: 0,
+		}); err != nil {
+			return errors.Wrap(err, "messages.readDiscussion")
+		}
+		return nil
+	}
 	if ch, ok := peer.(*tg.InputPeerChannel); ok {
 		if _, err := api.ChannelsReadHistory(ctx, &tg.ChannelsReadHistoryRequest{
 			Channel: &tg.InputChannel{ChannelID: ch.ChannelID, AccessHash: ch.AccessHash},
@@ -43,6 +55,8 @@ func markRead(ctx context.Context, api *tg.Client, peer tg.InputPeerClass) error
 }
 
 func (a *app) newReadCmd() *cobra.Command {
+	var topic topicOptions
+
 	cmd := &cobra.Command{
 		Use:     "read <peer>",
 		Short:   "Mark a chat as read",
@@ -50,7 +64,8 @@ func (a *app) newReadCmd() *cobra.Command {
 		Long: `Mark a peer's history as read up to the latest message. The peer is
 me/self, @username, phone, or a t.me link.`,
 		Example: `  tg read @durov
-  tg read @somechannel`,
+  tg read @somechannel
+  tg read @myforum --topic 42`,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: peerArgCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -59,17 +74,20 @@ me/self, @username, phone, or a t.me link.`,
 				if err != nil {
 					return err
 				}
-				peer, err := resolvePeer(ctx, m, args[0])
+				peerArg, topicID := topic.resolve(args[0])
+				peer, err := resolvePeer(ctx, m, peerArg)
 				if err != nil {
 					return err
 				}
-				if err := markRead(ctx, api, peer); err != nil {
+				if err := markRead(ctx, api, peer, topicID); err != nil {
 					return err
 				}
 				return a.printer.Emit(readResult{OK: true})
 			})
 		},
 	}
+
+	topic.register(cmd.Flags())
 
 	return cmd
 }

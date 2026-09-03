@@ -11,16 +11,40 @@ import (
 	"github.com/gotd/td/tg"
 )
 
-// messageContext fetches messages surrounding a message id (radius on each side).
-func messageContext(ctx context.Context, api *tg.Client, peer tg.InputPeerClass, id, radius int) (historyResult, error) {
-	res, err := api.MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
-		Peer:      peer,
-		OffsetID:  id,
-		AddOffset: -radius,
-		Limit:     2*radius + 1,
-	})
-	if err != nil {
-		return historyResult{}, errors.Wrap(err, "messages.getHistory")
+// messageContext fetches messages surrounding a message id (radius on each
+// side). A non-zero topic reads within that forum topic's thread, so the
+// neighbours are the ones actually adjacent in the topic.
+func messageContext(
+	ctx context.Context,
+	api *tg.Client,
+	peer tg.InputPeerClass,
+	id, radius, topic int,
+) (historyResult, error) {
+	var (
+		res tg.MessagesMessagesClass
+		err error
+	)
+	if topic != 0 {
+		res, err = api.MessagesGetReplies(ctx, &tg.MessagesGetRepliesRequest{
+			Peer:      peer,
+			MsgID:     topic,
+			OffsetID:  id,
+			AddOffset: -radius,
+			Limit:     2*radius + 1,
+		})
+		if err != nil {
+			return historyResult{}, errors.Wrap(err, "messages.getReplies")
+		}
+	} else {
+		res, err = api.MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
+			Peer:      peer,
+			OffsetID:  id,
+			AddOffset: -radius,
+			Limit:     2*radius + 1,
+		})
+		if err != nil {
+			return historyResult{}, errors.Wrap(err, "messages.getHistory")
+		}
 	}
 	msgs, ent, err := messagesFrom(res)
 	if err != nil {
@@ -34,7 +58,10 @@ func messageContext(ctx context.Context, api *tg.Client, peer tg.InputPeerClass,
 }
 
 func (a *app) newContextCmd() *cobra.Command {
-	var radius int
+	var (
+		radius int
+		topic  topicOptions
+	)
 
 	cmd := &cobra.Command{
 		Use:     "context <peer> <message-id>",
@@ -55,11 +82,12 @@ func (a *app) newContextCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				peer, err := resolvePeer(ctx, m, args[0])
+				peerArg, topicID := topic.resolve(args[0])
+				peer, err := resolvePeer(ctx, m, peerArg)
 				if err != nil {
 					return err
 				}
-				res, err := messageContext(ctx, api, peer, id, radius)
+				res, err := messageContext(ctx, api, peer, id, radius, topicID)
 				if err != nil {
 					return err
 				}
@@ -68,7 +96,9 @@ func (a *app) newContextCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().IntVarP(&radius, "radius", "r", 5, "number of messages to show on each side")
+	fs := cmd.Flags()
+	fs.IntVarP(&radius, "radius", "r", 5, "number of messages to show on each side")
+	topic.register(fs)
 
 	return cmd
 }

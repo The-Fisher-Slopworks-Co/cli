@@ -25,7 +25,7 @@ func TestSearchMessages(t *testing.T) {
 		return nil, errors.Errorf("unexpected request %T", req)
 	})
 
-	res, err := searchMessages(context.Background(), api, &tg.InputPeerUser{UserID: 9}, "found", nil, 50)
+	res, err := searchMessages(context.Background(), api, &tg.InputPeerUser{UserID: 9}, "found", nil, 50, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,10 +47,31 @@ func TestPinnedUsesPinnedFilter(t *testing.T) {
 		return nil, errors.Errorf("unexpected request %T", req)
 	})
 
-	if _, err := searchMessages(context.Background(), api, &tg.InputPeerUser{UserID: 1}, "", &tg.InputMessagesFilterPinned{}, 10); err != nil {
+	if _, err := searchMessages(context.Background(), api, &tg.InputPeerUser{UserID: 1}, "", &tg.InputMessagesFilterPinned{}, 10, 0); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := gotFilter.(*tg.InputMessagesFilterPinned); !ok {
 		t.Errorf("filter = %T, want InputMessagesFilterPinned", gotFilter)
+	}
+}
+
+// TestSearchMessagesTopic asserts --topic reaches the request as top_msg_id.
+func TestSearchMessagesTopic(t *testing.T) {
+	var gotTopic int
+	var gotSet bool
+	api := newFuncAPI(t, func(req bin.Encoder) (bin.Encoder, error) {
+		r, ok := req.(*tg.MessagesSearchRequest)
+		if !ok {
+			return nil, errors.Errorf("unexpected request %T", req)
+		}
+		gotTopic, gotSet = r.GetTopMsgID()
+		return &tg.MessagesMessages{}, nil
+	})
+
+	if _, err := searchMessages(context.Background(), api, &tg.InputPeerChannel{ChannelID: 1}, "q", nil, 10, 42); err != nil {
+		t.Fatal(err)
+	}
+	if !gotSet || gotTopic != 42 {
+		t.Errorf("top_msg_id = %d (set=%v), want 42", gotTopic, gotSet)
 	}
 }

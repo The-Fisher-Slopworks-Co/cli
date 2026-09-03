@@ -91,7 +91,10 @@ func (a *app) newUnpinCmd() *cobra.Command {
 }
 
 func (a *app) newUnpinAllCmd() *cobra.Command {
-	var yes bool
+	var (
+		yes   bool
+		topic topicOptions
+	)
 
 	cmd := &cobra.Command{
 		Use:               "unpin-all <peer>",
@@ -108,11 +111,16 @@ func (a *app) newUnpinAllCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				peer, err := resolvePeer(ctx, m, args[0])
+				peerArg, topicID := topic.resolve(args[0])
+				peer, err := resolvePeer(ctx, m, peerArg)
 				if err != nil {
 					return err
 				}
-				if _, err := api.MessagesUnpinAllMessages(ctx, &tg.MessagesUnpinAllMessagesRequest{Peer: peer}); err != nil {
+				req := &tg.MessagesUnpinAllMessagesRequest{Peer: peer}
+				if topicID != 0 {
+					req.SetTopMsgID(topicID)
+				}
+				if _, err := api.MessagesUnpinAllMessages(ctx, req); err != nil {
 					return errors.Wrap(err, "messages.unpinAllMessages")
 				}
 				return a.printer.Emit(pinResult{OK: true})
@@ -120,13 +128,18 @@ func (a *app) newUnpinAllCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&yes, "yes", false, "confirm unpinning all messages")
+	fs := cmd.Flags()
+	fs.BoolVar(&yes, "yes", false, "confirm unpinning all messages")
+	topic.register(fs)
 
 	return cmd
 }
 
 func (a *app) newPinnedCmd() *cobra.Command {
-	var limit int
+	var (
+		limit int
+		topic topicOptions
+	)
 
 	cmd := &cobra.Command{
 		Use:               "pinned <peer>",
@@ -134,18 +147,19 @@ func (a *app) newPinnedCmd() *cobra.Command {
 		GroupID:           groupMessaging,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: peerArgCompletion,
-		Example:           "  tg pinned @durov\n  tg pinned me --output json",
+		Example:           "  tg pinned @durov\n  tg pinned me --output json\n  tg pinned @myforum --topic 42",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.run(cmd.Context(), runParams{auth: authUser}, func(ctx context.Context, api *tg.Client) error {
 				m, err := a.manager(api)
 				if err != nil {
 					return err
 				}
-				peer, err := resolvePeer(ctx, m, args[0])
+				peerArg, topicID := topic.resolve(args[0])
+				peer, err := resolvePeer(ctx, m, peerArg)
 				if err != nil {
 					return err
 				}
-				res, err := searchMessages(ctx, api, peer, "", &tg.InputMessagesFilterPinned{}, limit)
+				res, err := searchMessages(ctx, api, peer, "", &tg.InputMessagesFilterPinned{}, limit, topicID)
 				if err != nil {
 					return err
 				}
@@ -154,7 +168,9 @@ func (a *app) newPinnedCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().IntVarP(&limit, "limit", "n", 50, "maximum number of pinned messages")
+	pfs := cmd.Flags()
+	pfs.IntVarP(&limit, "limit", "n", 50, "maximum number of pinned messages")
+	topic.register(pfs)
 
 	return cmd
 }

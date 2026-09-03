@@ -16,13 +16,16 @@ import (
 
 // chatItem describes one dialog.
 type chatItem struct {
-	Peer        peerRef `json:"peer"`
-	Unread      int     `json:"unread"`
-	Pinned      bool    `json:"pinned"`
-	Muted       bool    `json:"muted"`
-	Archived    bool    `json:"archived"`
-	LastMessage string  `json:"last_message,omitempty"`
-	LastDate    int     `json:"last_date,omitempty"`
+	Peer     peerRef `json:"peer"`
+	Unread   int     `json:"unread"`
+	Pinned   bool    `json:"pinned"`
+	Muted    bool    `json:"muted"`
+	Archived bool    `json:"archived"`
+	// Forum reports whether the chat is a supergroup with forum topics, i.e.
+	// whether `tg topics list` and --topic apply to it.
+	Forum       bool   `json:"forum,omitempty"`
+	LastMessage string `json:"last_message,omitempty"`
+	LastDate    int    `json:"last_date,omitempty"`
 }
 
 // chatList is the result of `tg chats list`.
@@ -42,6 +45,9 @@ func (l chatList) MarshalText(w io.Writer) error {
 		}
 		if c.Archived {
 			flags = append(flags, "archived")
+		}
+		if c.Forum {
+			flags = append(flags, "forum")
 		}
 		line := fmt.Sprintf("%-24s unread=%d", c.Peer.label(), c.Unread)
 		if len(flags) > 0 {
@@ -107,6 +113,11 @@ func listChats(ctx context.Context, api *tg.Client, m *peerManager, limit int, a
 		}
 		if mute, ok := dlg.NotifySettings.GetMuteUntil(); ok && int64(mute) > now {
 			item.Muted = true
+		}
+		if pc, ok := dlg.Peer.(*tg.PeerChannel); ok {
+			if ch, ok := elem.Entities.Channel(pc.ChannelID); ok {
+				item.Forum = ch.Forum
+			}
 		}
 		if msg, ok := elem.Last.(*tg.Message); ok {
 			item.LastMessage = messagePreview(msg)

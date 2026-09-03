@@ -34,7 +34,8 @@ func (r draftsResult) MarshalText(w io.Writer) error {
 	return nil
 }
 
-// saveDraft sets or clears the draft for a peer (empty message clears it).
+// saveDraft sets or clears the draft for a peer (empty message clears it). The
+// api client carries the topic, if any, so the draft lands in the right thread.
 func saveDraft(ctx context.Context, api *tg.Client, peer tg.InputPeerClass, text string) error {
 	if _, err := api.MessagesSaveDraft(ctx, &tg.MessagesSaveDraftRequest{
 		Peer:    peer,
@@ -87,32 +88,42 @@ func (a *app) newDraftCmd() *cobra.Command {
 }
 
 func (a *app) newDraftSetCmd() *cobra.Command {
+	var topic topicOptions
+
 	cmd := &cobra.Command{
 		Use:               "set <peer> <text>",
 		Short:             "Set the draft for a peer",
 		Args:              cobra.ExactArgs(2),
 		ValidArgsFunction: peerArgCompletion,
+		Example: `  tg draft set @durov "wip"
+  tg draft set @myforum --topic 42 "wip"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.run(cmd.Context(), runParams{auth: authUser}, func(ctx context.Context, api *tg.Client) error {
 				m, err := a.manager(api)
 				if err != nil {
 					return err
 				}
-				peer, err := resolvePeer(ctx, m, args[0])
+				peerArg, topicID := topic.resolve(args[0])
+				peer, err := resolvePeer(ctx, m, peerArg)
 				if err != nil {
 					return err
 				}
-				if err := saveDraft(ctx, api, peer, args[1]); err != nil {
+				if err := saveDraft(ctx, topicClient(api, topicID), peer, args[1]); err != nil {
 					return err
 				}
 				return a.printer.Emit(pinResult{OK: true})
 			})
 		},
 	}
+
+	topic.register(cmd.Flags())
+
 	return cmd
 }
 
 func (a *app) newDraftClearCmd() *cobra.Command {
+	var topic topicOptions
+
 	cmd := &cobra.Command{
 		Use:               "clear <peer>",
 		Short:             "Clear the draft for a peer",
@@ -124,17 +135,21 @@ func (a *app) newDraftClearCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				peer, err := resolvePeer(ctx, m, args[0])
+				peerArg, topicID := topic.resolve(args[0])
+				peer, err := resolvePeer(ctx, m, peerArg)
 				if err != nil {
 					return err
 				}
-				if err := saveDraft(ctx, api, peer, ""); err != nil {
+				if err := saveDraft(ctx, topicClient(api, topicID), peer, ""); err != nil {
 					return err
 				}
 				return a.printer.Emit(pinResult{OK: true})
 			})
 		},
 	}
+
+	topic.register(cmd.Flags())
+
 	return cmd
 }
 

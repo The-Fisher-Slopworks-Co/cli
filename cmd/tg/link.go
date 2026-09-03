@@ -25,13 +25,18 @@ func (r linkResult) MarshalText(w io.Writer) error {
 }
 
 func (a *app) newLinkCmd() *cobra.Command {
+	var thread bool
+
 	cmd := &cobra.Command{
 		Use:     "link <peer> <message-id>",
 		Short:   "Get a public link to a message",
 		GroupID: groupMessaging,
-		Long:    "Export a t.me link to a message. Only works for channels and supergroups.",
+		Long: `Export a t.me link to a message. Only works for channels and supergroups.
+With --thread the link opens the message inside its forum topic (or comment
+thread) rather than in the chat's main history.`,
 		Example: `  tg link @durov 12345
-  tg link @somechannel 42 --output json`,
+  tg link @somechannel 42 --output json
+  tg link @myforum 1337 --thread`,
 		Args:              cobra.ExactArgs(2),
 		ValidArgsFunction: peerArgCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -55,6 +60,7 @@ func (a *app) newLinkCmd() *cobra.Command {
 				res, err := api.ChannelsExportMessageLink(ctx, &tg.ChannelsExportMessageLinkRequest{
 					Channel: &tg.InputChannel{ChannelID: ch.ChannelID, AccessHash: ch.AccessHash},
 					ID:      id,
+					Thread:  thread,
 				})
 				if err != nil {
 					return errors.Wrap(err, "channels.exportMessageLink")
@@ -63,5 +69,9 @@ func (a *app) newLinkCmd() *cobra.Command {
 			})
 		},
 	}
+
+	cmd.Flags().BoolVar(&thread, "thread", false,
+		"link into the message's forum topic / comment thread")
+
 	return cmd
 }

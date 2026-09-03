@@ -25,7 +25,7 @@ func TestListHistory(t *testing.T) {
 		return nil, errors.Errorf("unexpected request %T", req)
 	})
 
-	res, err := listHistory(context.Background(), api, &tg.InputPeerSelf{}, 30)
+	res, err := listHistory(context.Background(), api, &tg.InputPeerSelf{}, 30, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestListHistoryLimit(t *testing.T) {
 		return nil, errors.Errorf("unexpected request %T", req)
 	})
 
-	res, err := listHistory(context.Background(), api, &tg.InputPeerSelf{}, 2)
+	res, err := listHistory(context.Background(), api, &tg.InputPeerSelf{}, 2, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,11 +94,41 @@ func TestListHistoryBatchSize(t *testing.T) {
 			}, nil
 		})
 
-		if _, err := listHistory(context.Background(), api, &tg.InputPeerSelf{}, tt.limit); err != nil {
+		if _, err := listHistory(context.Background(), api, &tg.InputPeerSelf{}, tt.limit, 0); err != nil {
 			t.Fatalf("limit %d: %v", tt.limit, err)
 		}
 		if gotBatch != tt.wantBatch {
 			t.Errorf("limit %d: request limit = %d, want %d", tt.limit, gotBatch, tt.wantBatch)
 		}
+	}
+}
+
+// TestListHistoryTopic asserts that a topic switches the read to
+// messages.getReplies scoped to that topic, instead of the whole chat history.
+func TestListHistoryTopic(t *testing.T) {
+	var gotMsgID int
+	api := newFuncAPI(t, func(req bin.Encoder) (bin.Encoder, error) {
+		r, ok := req.(*tg.MessagesGetRepliesRequest)
+		if !ok {
+			return nil, errors.Errorf("unexpected request %T", req)
+		}
+		gotMsgID = r.MsgID
+		return &tg.MessagesChannelMessages{
+			Messages: []tg.MessageClass{
+				&tg.Message{ID: 7, PeerID: &tg.PeerChannel{ChannelID: 9}, Message: "in topic", Date: 1},
+			},
+			Chats: []tg.ChatClass{&tg.Channel{ID: 9, Title: "forum", Forum: true, Photo: &tg.ChatPhotoEmpty{}}},
+		}, nil
+	})
+
+	res, err := listHistory(context.Background(), api, &tg.InputPeerChannel{ChannelID: 9}, 30, 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotMsgID != 42 {
+		t.Errorf("getReplies msg_id = %d, want 42", gotMsgID)
+	}
+	if len(res.Messages) != 1 || res.Messages[0].ID != 7 {
+		t.Errorf("unexpected messages: %+v", res.Messages)
 	}
 }

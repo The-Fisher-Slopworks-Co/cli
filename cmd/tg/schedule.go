@@ -25,8 +25,9 @@ func (a *app) newScheduleCmd() *cobra.Command {
 
 func (a *app) newScheduleSendCmd() *cobra.Command {
 	var (
-		at string
-		in time.Duration
+		at    string
+		in    time.Duration
+		topic topicOptions
 	)
 
 	cmd := &cobra.Command{
@@ -36,18 +37,23 @@ func (a *app) newScheduleSendCmd() *cobra.Command {
 		ValidArgsFunction: peerArgCompletion,
 		Long:              "Schedule a message with --at (RFC3339 time) or --in (duration from now).",
 		Example: `  tg schedule send @durov "happy new year" --at 2027-01-01T00:00:00Z
-  tg schedule send me "reminder" --in 2h`,
+  tg schedule send me "reminder" --in 2h
+  tg schedule send @myforum "standup" --topic 42 --in 1h`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			when, err := scheduleTime(at, in)
 			if err != nil {
 				return err
 			}
 			return a.run(cmd.Context(), runParams{auth: authUser}, func(ctx context.Context, api *tg.Client) error {
-				sender, m, err := a.sender(api)
+				peerArg, topicID := topic.resolve(args[0])
+				sender, m, err := a.senderIn(api, topicID)
 				if err != nil {
 					return err
 				}
-				bf, err := builderFor(ctx, m, sender, args[0])
+				if err := requireForum(ctx, m, peerArg, topicID); err != nil {
+					return err
+				}
+				bf, err := builderFor(ctx, m, sender, peerArg)
 				if err != nil {
 					return err
 				}
@@ -57,7 +63,7 @@ func (a *app) newScheduleSendCmd() *cobra.Command {
 				if err != nil {
 					return errors.Wrap(err, "schedule send")
 				}
-				return a.printer.Emit(sentResult{Peer: args[0], MessageID: id})
+				return a.printer.Emit(sentResult{Peer: peerArg, MessageID: id})
 			})
 		},
 	}
@@ -65,6 +71,7 @@ func (a *app) newScheduleSendCmd() *cobra.Command {
 	fs := cmd.Flags()
 	fs.StringVar(&at, "at", "", "absolute time (RFC3339), e.g. 2027-01-01T00:00:00Z")
 	fs.DurationVar(&in, "in", 0, "relative delay from now, e.g. 2h")
+	topic.register(fs)
 
 	return cmd
 }
