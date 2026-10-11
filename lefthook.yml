@@ -1,0 +1,22 @@
+# The gate from CLAUDE.md's Definition of done, run at commit time. Install the
+# hook once with `lefthook install` (lefthook: `brew install lefthook` or
+# `go install github.com/evilmartians/lefthook@latest`); `LEFTHOOK=0 git commit`
+# skips it once.
+#
+# Every job checks and never rewrites staged files: a hook that edits them
+# silently widens a `git add -p` commit to the whole file. golangci-lint also
+# runs the gofmt/goimports formatters in check mode.
+pre-commit:
+  parallel: true
+  jobs:
+    - name: lint
+      glob: "*.go"
+      run: golangci-lint run ./...
+
+    - name: test
+      glob: "*.go"
+      run: go test -race ./...
+
+    - name: mod-tidy
+      glob: "{go.mod,go.sum,*.go}"
+      run: go mod tidy -diff
