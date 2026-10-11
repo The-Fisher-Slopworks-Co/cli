@@ -1,0 +1,11 @@
+version = 1
+
+# This repository is a fork of gotd/cli (https://github.com/gotd/cli) and keeps
+# its upstream MIT licence. Every file is annotated with the upstream licence
+# and the upstream copyright holders; precedence = "closest" lets a file's own
+# inline SPDX header (when present) win over this wildcard.
+[[annotations]]
+path = "**"
+precedence = "closest"
+SPDX-FileCopyrightText = "gotd contributors"
+SPDX-License-Identifier = "MIT"
