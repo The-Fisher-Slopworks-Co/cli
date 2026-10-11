@@ -87,7 +87,7 @@ func (a *app) resolveFilterFor(
 	st *accountState,
 	args []string,
 	topic topicOptions,
-) (int64, int, error) {
+) (filterID int64, topicID int, err error) {
 	if len(args) == 0 {
 		if topic.id != 0 {
 			return 0, 0, errors.New("--topic needs a peer argument")

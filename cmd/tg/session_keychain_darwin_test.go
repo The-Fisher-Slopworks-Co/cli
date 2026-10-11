@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -72,7 +73,7 @@ func TestKeychainMigration(t *testing.T) {
 		t.Fatalf("Exists() with legacy file = %v, %v; want true, nil", ok, err)
 	}
 	got, err := store.LoadSession(ctx)
-	if err != nil || string(got) != string(want) {
+	if err != nil || !bytes.Equal(got, want) {
 		t.Fatalf("LoadSession() = %q, %v; want %q, nil", got, err, want)
 	}
 	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
@@ -80,7 +81,7 @@ func TestKeychainMigration(t *testing.T) {
 	}
 	// Now served from the Keychain, no file.
 	got, err = store.LoadSession(ctx)
-	if err != nil || string(got) != string(want) {
+	if err != nil || !bytes.Equal(got, want) {
 		t.Fatalf("LoadSession() after migration = %q, %v; want %q, nil", got, err, want)
 	}
 	if err := store.Delete(ctx); err != nil {

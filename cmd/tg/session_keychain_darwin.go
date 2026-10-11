@@ -34,28 +34,48 @@ type keychainStore struct {
 	legacy  string // pre-Keychain file session, migrated then deleted.
 }
 
+// `security` flags that select a generic password by service and account.
+const (
+	keychainServiceFlag = "-s"
+	keychainAccountFlag = "-a"
+)
+
+// keychainItemArgs selects the generic password by service and account.
+func keychainItemArgs(service, account string) []string {
+	return []string{keychainServiceFlag, service, keychainAccountFlag, account}
+}
+
 func keychainAddArgs(service, account, secret string) []string {
 	// -U updates the item in place when it already exists.
-	return []string{"add-generic-password", "-U", "-s", service, "-a", account, "-w", secret}
+	args := append([]string{"add-generic-password", "-U"}, keychainItemArgs(service, account)...)
+	return append(args, "-w", secret)
 }
 
 func keychainFindArgs(service, account string) []string {
 	// -w prints only the password to stdout.
-	return []string{"find-generic-password", "-s", service, "-a", account, "-w"}
+	args := append([]string{"find-generic-password"}, keychainItemArgs(service, account)...)
+	return append(args, "-w")
 }
 
 func keychainDeleteArgs(service, account string) []string {
-	return []string{"delete-generic-password", "-s", service, "-a", account}
+	return append([]string{"delete-generic-password"}, keychainItemArgs(service, account)...)
 }
 
-// isNotFound reports whether err is `security` signalling a missing item.
+// securityCmd runs the macOS `security` tool. The binary is fixed and the
+// arguments are passed straight to exec (no shell), built by the
+// keychain*Args helpers above from the configured service and account.
+func securityCmd(ctx context.Context, args ...string) *exec.Cmd {
+	return exec.CommandContext(ctx, "security", args...) //nolint:gosec // G204: fixed binary, no shell; see above.
+}
+
+// isNotFound reports whether err is `security` signaling a missing item.
 func isNotFound(err error) bool {
 	var ee *exec.ExitError
 	return errors.As(err, &ee) && ee.ExitCode() == keychainNotFound
 }
 
 func (s *keychainStore) LoadSession(ctx context.Context) ([]byte, error) {
-	out, err := exec.CommandContext(ctx, "security", keychainFindArgs(s.service, s.account)...).Output()
+	out, err := securityCmd(ctx, keychainFindArgs(s.service, s.account)...).Output()
 	switch {
 	case err == nil:
 		// security appends a trailing newline to the password it prints.
@@ -78,7 +98,7 @@ func (s *keychainStore) LoadSession(ctx context.Context) ([]byte, error) {
 }
 
 func (s *keychainStore) StoreSession(ctx context.Context, data []byte) error {
-	if err := exec.CommandContext(ctx, "security", keychainAddArgs(s.service, s.account, string(data))...).Run(); err != nil {
+	if err := securityCmd(ctx, keychainAddArgs(s.service, s.account, string(data))...).Run(); err != nil {
 		return errors.Wrap(err, "keychain add")
 	}
 	// Any write supersedes a pre-Keychain file session; remove it best-effort.
@@ -89,7 +109,7 @@ func (s *keychainStore) StoreSession(ctx context.Context, data []byte) error {
 }
 
 func (s *keychainStore) Exists(ctx context.Context) (bool, error) {
-	err := exec.CommandContext(ctx, "security", keychainFindArgs(s.service, s.account)...).Run()
+	err := securityCmd(ctx, keychainFindArgs(s.service, s.account)...).Run()
 	if err == nil {
 		return true, nil
 	}
@@ -104,7 +124,7 @@ func (s *keychainStore) Exists(ctx context.Context) (bool, error) {
 }
 
 func (s *keychainStore) Delete(ctx context.Context) error {
-	err := exec.CommandContext(ctx, "security", keychainDeleteArgs(s.service, s.account)...).Run()
+	err := securityCmd(ctx, keychainDeleteArgs(s.service, s.account)...).Run()
 	if err != nil && !isNotFound(err) {
 		return errors.Wrap(err, "keychain delete")
 	}

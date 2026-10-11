@@ -13,7 +13,7 @@ import (
 
 // messageContext fetches messages surrounding a message id (radius on each
 // side). A non-zero topic reads within that forum topic's thread, so the
-// neighbours are the ones actually adjacent in the topic.
+// neighbors are the ones actually adjacent in the topic.
 func messageContext(
 	ctx context.Context,
 	api *tg.Client,
