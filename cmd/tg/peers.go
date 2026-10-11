@@ -59,11 +59,14 @@ func isIDArg(arg string) bool {
 	return strings.HasPrefix(strings.TrimSpace(arg), peerIDPrefix)
 }
 
+// peerMe is the peer string for the current account's Saved Messages.
+const peerMe = "me"
+
 // isSelf reports whether a peer string targets the current account's Saved
 // Messages: the empty string, "me" or "self" (case-insensitive).
 func isSelf(peer string) bool {
 	switch strings.ToLower(strings.TrimSpace(peer)) {
-	case "", "me", "self":
+	case "", peerMe, "self":
 		return true
 	default:
 		return false

@@ -32,7 +32,7 @@ func (o *topicOptions) register(fs *pflag.FlagSet) {
 // resolve merges the --topic flag with a topic id embedded in the peer
 // argument. An explicit --topic wins; the returned peer string has the topic
 // path segment stripped.
-func (o *topicOptions) resolve(peerArg string) (string, int) {
+func (o *topicOptions) resolve(peerArg string) (peer string, topicID int) {
 	p, topic := splitTopicLink(peerArg)
 	if o.id != 0 {
 		return p, o.id
@@ -67,7 +67,7 @@ func trimLinkHost(arg string) (string, bool) {
 // A two-segment link (t.me/<username>/<message>) addresses a message, not a
 // topic. Anything that is not a topic link is returned unchanged, so peers that
 // already resolved keep resolving exactly as before.
-func splitTopicLink(arg string) (string, int) {
+func splitTopicLink(arg string) (peer string, topicID int) {
 	rest, ok := trimLinkHost(arg)
 	if !ok {
 		return arg, 0

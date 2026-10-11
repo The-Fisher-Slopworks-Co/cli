@@ -30,7 +30,7 @@ func TestSplitTopicLink(t *testing.T) {
 		{in: "id:42", wantPeer: "id:42"},
 		{in: "+79001234567", wantPeer: "+79001234567"},
 
-		// Plain peer and message links keep today's behaviour.
+		// Plain peer and message links keep today's behavior.
 		{in: "https://t.me/durov", wantPeer: "https://t.me/durov"},
 		{in: "t.me/durov/1337", wantPeer: "t.me/durov/1337"},
 		{in: "t.me/joinchat/AAAA", wantPeer: "t.me/joinchat/AAAA"},
