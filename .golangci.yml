@@ -29,12 +29,18 @@ linters:
       min-occurrences: 3
     gocritic:
       disabled-checks:
+        # Copy-size performance hints. gotd's generated tg.* types are large
+        # structs handled by value throughout, and the CLI is network-bound,
+        # so these flag nearly every handler without a measurable gain.
         - hugeParam
         - rangeValCopy
+        # main() calls os.Exit(1) after the root command has returned; the
+        # deferred signal-context cancel has nothing left to release by then.
         - exitAfterDefer
-        - whyNoLint
+        # The mock invokers in tests dispatch on the request type with a type
+        # switch even when they expect one request, matching the multi-request
+        # mocks next to them.
         - singleCaseSwitch
-        - commentedOutCode
       enabled-tags:
         - diagnostic
         - experimental

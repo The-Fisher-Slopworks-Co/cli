@@ -38,6 +38,7 @@ go test ./cmd/tg/ -run TestName      # a single test
 golangci-lint run ./...              # lint (config in .golangci.yml; CI pins v2.12.1)
 gofmt -l .                           # list misformatted files; gofmt -w to fix
 go mod tidy                          # CI fails if this produces a diff
+lefthook install                     # once: run lint, tests and the tidy check on every commit
 ```
 
 Go 1.25. Releases are cut by pushing a `v*` tag, which triggers GoReleaser
