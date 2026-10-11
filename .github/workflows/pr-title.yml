@@ -1,0 +1,30 @@
+# Conventional-commit PR titles and no AI attribution, via the org's reusable
+# workflow. The scopes are the command package (cmd/tg -> tg) and the
+# internal/ packages, plus deps, github and release.
+name: PR title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  pr-title:
+    uses: The-Fisher-Slopworks-Co/.github/.github/workflows/pr-title.yml@main
+    with:
+      scopes: |
+        tg
+        output
+        peercache
+        pretty
+        proxy
+        deps
+        github
+        release
